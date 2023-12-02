@@ -1,1 +1,1 @@
-export const DB_NAME = 'backend-course';
+export const DB_NAME = 'Vyld-assignment';

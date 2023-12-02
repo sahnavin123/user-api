@@ -1,82 +1,131 @@
-import { Request, Response } from 'express';
-import { asyncHandler } from '../utils/asyncHandler';
+import { NextFunction, Request, Response } from 'express';
+import * as bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import ApiError from '../utils/ApiError';
 import { User } from '../models/user.model';
-import { uploadOnCloudinary } from '../utils/cloudinary';
-import ApiResponse from '../utils/ApiResponse';
+import asyncHandler from '../utils/asyncHandler';
 
-const registerUser = asyncHandler(async (req: Request, res: Response) => {
-  //get user details from frontend
-  const { fullname, email, username, password } = req.body;
-  if (
-    [fullname, email, username, password].some((field) => field?.trim() === '')
-  ) {
-    throw new ApiError(400, 'All fields are required');
+const registerUser = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { name, username, bio, age, password } = req.body;
+
+      if (!username || !password || !name) {
+        throw new ApiError(400, 'username, password, name is required field');
+      }
+
+      const userAvailable = await User.findOne({ username });
+      if (userAvailable) {
+        throw new ApiError(409, `user with ${username} username already exists`);
+      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const user = await User.create({
+        active: true,
+        username,
+        hashedPassword,
+        name,
+        bio,
+        age,
+      });
+
+
+      if (user) {
+        return res.status(201).json({
+          _id: user.id,
+          message: 'user created successfully',
+          username: user.username,
+          name: user.name,
+          bio: user.bio,
+          age: user.age,
+        });
+      } else {
+        throw new ApiError(400, 'user data is not valid');
+      }
+    } catch (error) {
+      next(error);
+    }
   }
+);
 
-  //validation - not empty
+export const loginUser = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        throw new ApiError(400, 'All fields are mandatory');
+      }
 
-  // check if user already exists :username, email
-  const existedUser = await User.findOne({
-    $or: [{ email }, { username }],
-  });
+      const user = await User.findOne({ username });
 
-  if (existedUser) {
-    throw new ApiError(409, 'user with email or username already exists');
+      if (user && (await bcrypt.compare(password, user.hashedPassword))) {
+        const accessToken = jwt.sign(
+          {
+            _id: user.id,
+            username: user.username,
+          },
+          process.env.ACCESS_TOKEN_SECRET as string,
+          { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
+        );
+        return res.status(200).json({
+          name: user.name,
+          username: user.username,
+          accessToken: accessToken,
+        });
+      } else {
+        throw new ApiError(401, 'username or password is not valid');
+      }
+    } catch (error) {
+      next(error);
+    }
   }
+);
 
-  //check for images, check for avatar
-  const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-  // const avatarLocalPath = req.files?.avatar[0]?.path ;
-  const avatarLocalPath = files['avatar'][0]?.path;
-  // const coverImageLocalPath = files['coverImage'][0]?.path;
+export const getUserDetails = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      throw new ApiError(401, 'not authorization header found');
+    }
 
-  let coverImageLocalPath;
-  if (
-    files &&
-    Array.isArray(files['coverImage']) &&
-    files['coverImage'].length > 0
-  ) {
-    coverImageLocalPath = files['coverImage'][0].path;
+    let verifiedToken : jwt.JwtPayload;
+    try {
+      const accessToken = authHeader?.split(' ')[1] as string;
+      verifiedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET as string) as jwt.JwtPayload;
+
+    } catch (error) {
+      throw new ApiError(401, 'Invalid authorization header');
+    }
+
+    const user = await User.findOne({ _id: verifiedToken._id });
+
+    if (!user) {
+      new ApiError(404, 'no user data found');
+    }
+
+    res.send({
+      name: user?.name,
+      username: user?.username,
+      bio: user?.bio,
+      age: user?.age
+    });
+
+    next();
   }
-
-  if (!avatarLocalPath) {
-    throw new ApiError(400, 'Avatar file is required');
+);
+export const updateUserDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.send({ message: 'hello' });
   }
-
-  // upload them to cloudinary, avatar
-  const avatar = await uploadOnCloudinary(avatarLocalPath);
-  const coverImage = await uploadOnCloudinary(coverImageLocalPath);
-
-  if (!avatar) {
-    throw new ApiError(400, 'Avatar file is required');
+);
+export const deleteUserAccount = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.send({ message: 'hello' });
   }
+);
 
-  // create user object - create entry in db
-
-  const user = await User.create({
-    fullname,
-    avatar: avatar?.secure_url,
-    coverImage: coverImage?.secure_url || '',
-    email,
-    password,
-    username: username.toLowerCase(),
-  });
-
-  // remove the password and refreshToken field from response
-  const createdUser = await User.findById(user._id).select(
-    '-password -refreshToken'
-  );
-
-  // check for user creation
-  if (!createdUser) {
-    throw new ApiError(500, 'Something went wrong while registering user');
-  }
-
-  // return response
-  return res
-    .status(201)
-    .json(new ApiResponse(200, createdUser, 'User registered successfully '));
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  res.send({ message: 'hello' });
 });
 
 export { registerUser };

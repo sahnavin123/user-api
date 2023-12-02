@@ -1,16 +1,20 @@
 import { Router } from 'express';
-import { registerUser } from '../controllers/user.controller';
-import { upload } from '../middlewares/multer.middleware';
+import {
+  deleteUserAccount,
+  getUserDetails,
+  loginUser,
+  logout,
+  registerUser,
+  updateUserDetails,
+} from '../controllers/user.controller';
 
 const router = Router();
 
-router.route('/register').post(
-  upload.fields([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'coverImage', maxCount: 1 },
-  ]),
-  registerUser
-);
-// router.route('/login').post(login);
+router.route('/register').post(registerUser);
+router.route('/login').post(loginUser);
+router.route('/details').get(getUserDetails);
+router.route('/update').put(updateUserDetails);
+router.route('/delete').delete(deleteUserAccount);
+router.route('/logout').post(logout);
 
 export default router;

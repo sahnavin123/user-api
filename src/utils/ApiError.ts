@@ -25,4 +25,14 @@ export default class ApiError extends Error {
       Error.captureStackTrace(this, this.constructor);
     }
   }
+
+  toJson() {
+    const json: { [key: string]: any } = {};
+    json.message = this.message;
+    Object.entries(this).forEach(([key, value]) => {
+      json[key] = value;
+    });
+
+    return json;
+  }
 }
