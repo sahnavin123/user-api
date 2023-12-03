@@ -9,6 +9,7 @@ interface UserDb {
   bio?: string;
   age?: number;
   hashedPassword: string;
+  deletionTimestamp?: Date;
 }
 
 const userSchema = new Schema<UserDb>(
@@ -37,6 +38,10 @@ const userSchema = new Schema<UserDb>(
     hashedPassword: {
       type: String,
       required: [true, 'Password is required'],
+    },
+    deletionTimestamp: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }
