@@ -4,15 +4,15 @@ import jwt from 'jsonwebtoken';
 import ApiError from '../utils/ApiError';
 import { User } from '../models/user.model';
 import asyncHandler from '../utils/asyncHandler';
-import { verifyAccessToken } from '../utils/verifyAccessToken';
+import { blacklistedTokens, invalidateToken, isTokenBlacklisted, verifyAccessToken } from '../utils/accessToken.util';
 
 export const registerUser = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { name, username, bio, age, password } = req.body;
 
-      if (!username || !password || !name) {
-        throw new ApiError(400, 'username, password, name is required field');
+      if (!username || !password || !name || !bio || !age) {
+        throw new ApiError(400, 'all fields are required');
       }
 
       const userAvailable = await User.findOne({ username });
@@ -35,7 +35,7 @@ export const registerUser = asyncHandler(
 
       if (user) {
         return res.status(201).json({
-          _id: user.id,
+          id: user.id,
           message: 'user created successfully',
           username: user.username,
           name: user.name,
@@ -61,13 +61,12 @@ export const loginUser = asyncHandler(
 
       const user = await User.findOne({ username });
 
+      if (!user) {
+        throw new ApiError(404, 'user not found');
+      }
+
       if (user && (await bcrypt.compare(password, user.hashedPassword))) {
-        const accessToken = jwt.sign(
-          {
-            _id: user.id,
-            username: user.username,
-          },
-          process.env.ACCESS_TOKEN_SECRET as string,
+        const accessToken = jwt.sign({ id: user.id }, process.env.ACCESS_TOKEN_SECRET as string,
           { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
         );
         return res.status(200).json({
@@ -91,18 +90,24 @@ export const getUserDetails = asyncHandler(
       throw new ApiError(401, 'not authorization header found');
     }
 
+
     let verifiedToken: jwt.JwtPayload;
+    const accessToken = authHeader?.split(' ')[1] as string;
+
+    if (isTokenBlacklisted(accessToken)) {
+      throw new ApiError(401, 'Unauthorized - Token has been invalidated');
+    }
+
     try {
-      const accessToken = authHeader?.split(' ')[1] as string;
       verifiedToken = verifyAccessToken(accessToken);
     } catch (error) {
       throw new ApiError(401, 'Invalid authorization header');
     }
 
-    const user = await User.findOne({ _id: verifiedToken._id });
+    const user = await User.findOne({ _id: verifiedToken.id });
 
     if (!user) {
-      new ApiError(404, 'no user data found');
+      throw new ApiError(404, 'no user data found');
     }
 
     res.send({
@@ -127,6 +132,11 @@ export const updateUserDetails = asyncHandler(
       }
 
       const token = authHeader.split(' ')[1];
+
+      if (isTokenBlacklisted(token)) {
+        throw new ApiError(401, 'Unauthorized - Token has been invalidated');
+      }
+
       let verifiedToken: jwt.JwtPayload;
       try {
         verifiedToken = verifyAccessToken(token);
@@ -134,7 +144,12 @@ export const updateUserDetails = asyncHandler(
         throw new ApiError(401, 'Unauthorized - Invalid Token');
       }
 
-      const user = await User.findById(verifiedToken._id);
+      const userNameExist = await User.findOne({ username });
+      if (userNameExist) {
+        throw new ApiError(401, 'This user name have already been used try new user name');
+      }
+
+      const user = await User.findById(verifiedToken.id);
       if (!user) {
         throw new ApiError(404, 'User not found');
       }
@@ -161,57 +176,40 @@ export const updateUserDetails = asyncHandler(
   }
 );
 
-export const deleteUserAccount = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const authHeader = req.headers.authorization;
-      if (!authHeader) {
-        throw new ApiError(401, 'Unauthorized - Missing Authorization Header');
-      }
-
-      const token = authHeader.split(' ')[1];
-
-      let verifiedToken: jwt.JwtPayload;
-      try {
-        verifiedToken = verifyAccessToken(token);
-      } catch (error) {
-        throw new ApiError(401, 'Unauthorized - Invalid Token');
-      }
-
-      const user = await User.findById(verifiedToken._id);
-      if (!user) {
-        throw new ApiError(404, 'User not found');
-      }
-
-      await user.deleteOne({ _id: user._id });
-
-      // Respond with confirmation
-      res.json({
-        message: 'User account deleted successfully',
-      });
-
-      // const confirmDelete = req.body.confirmDelete;
-      // if (!confirmDelete) {
-      //   throw new ApiError(400, 'Please confirm the account deletion by providing "confirmDelete: true" in the request body.');
-      // }
-
-      // const gracePeriodInMilliseconds = 7 * 24 * 60 * 60 * 1000; // 7 days
-      // const deletionTimestamp = Date.now() + gracePeriodInMilliseconds;
-
-      // // Update the user account to mark it for deletion
-      // user.deletionTimestamp = new Date(deletionTimestamp);
-      // await user.save();
-
-      // // Respond with confirmation and information about the grace period
-      // res.json({
-      //   message: 'User account marked for deletion. You have a grace period to recover your account.',
-      //   gracePeriod: `${gracePeriodInMilliseconds / (24 * 60 * 60 * 1000)} days`,
-      // });
-    } catch (error) {
-      next(error);
+export const deleteUserAccount = asyncHandler( async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Retrieve the user's authentication token from the request headers
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      throw new ApiError(401, 'Unauthorized - Missing Authorization Header');
     }
+
+    const token = authHeader.split(' ')[1];
+
+    const verifiedToken = verifyAccessToken(token);
+
+    const user = await User.findById(verifiedToken.id);
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    // Confirm that the password matches
+    const { password } = req.body;
+    if (!password || !(await bcrypt.compare(password, user.hashedPassword))) {
+      throw new ApiError(401, 'Unauthorized - Incorrect Password Confirmation');
+    }
+
+    // Delete the user
+    await user.deleteOne();
+
+    // Respond with confirmation
+    res.json({
+      message: 'User account deleted successfully',
+    });
+  } catch (error) {
+    next(error);
   }
-);
+});
 
 export const logout = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -221,28 +219,29 @@ export const logout = asyncHandler(async (req: Request, res: Response, next: Nex
     }
 
     const token = authHeader.split(' ')[1]; // Assuming Bearer token format
+    if (isTokenBlacklisted(token)) {
+      throw new ApiError(401, 'Unauthorized - Token has been invalidated');
+    }
 
-    // Verify the token to get the user ID
     let verifiedToken: jwt.JwtPayload;
     try {
-      verifiedToken = verifyAccessToken(token); // Verify the token
+      verifiedToken = verifyAccessToken(token);
     } catch (error) {
       throw new ApiError(401, 'Unauthorized - Invalid Token');
     }
 
-    console.log(verifiedToken);
+    const user = await User.findById(verifiedToken.id);
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
 
-    // You can add the token to a blacklist here (the implementation is not provided)
-    // Blacklisting can be done using a cache, database, or another mechanism.
-
-    // Alternatively, you might implement token expiration and handle it in the client-side.
-
-    // Respond with confirmation of logout
+    invalidateToken(token);
     res.json({
       message: 'User logged out successfully',
     });
+
+    console.log(blacklistedTokens);
   } catch (error) {
     next(error);
   }
 });
-

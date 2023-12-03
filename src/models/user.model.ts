@@ -9,7 +9,7 @@ interface UserDb {
   bio?: string;
   age?: number;
   hashedPassword: string;
-  deletionTimestamp?: Date;
+  deletionTimestamp?: Date | null | undefined;
 }
 
 const userSchema = new Schema<UserDb>(

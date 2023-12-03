@@ -10,7 +10,7 @@ To set up and run the calculator API locally, follow these steps:
 
 - [Node.js](https://nodejs.org/) installed on your machine.
 
-### Postman collection link 
+## Postman collection link 
 - [click here](https://www.postman.com/sonarnks/workspace/vyld-backend-assignment/collection/28600942-73257cd7-10b9-45a2-aae3-f10338e2b16d?action=share&creator=28600942)
 
 ### Steps
@@ -96,6 +96,7 @@ The application will be accessible at http://localhost:8000
 - **Functionality:** Allows a user to permanently delete their account.
 - **Input:**
   - User's authentication token.
+  - password
 - **Output:**
   - Confirmation of account deletion.
 
